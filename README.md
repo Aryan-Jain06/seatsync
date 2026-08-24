@@ -482,6 +482,9 @@ loadtest/
 component, every design decision and the alternatives that were rejected, plus
 answers to the hardest questions this project invites.
 
+**[GOLIVE.md](GOLIVE.md)** — a click-by-click walkthrough to get this running
+on a public URL for free, in about an hour.
+
 **[DEPLOYMENT.md](DEPLOYMENT.md)** — what to add to run this for real, and how.
 
 **[INTEGRATIONS.md](INTEGRATIONS.md)** — connecting real services: payment
