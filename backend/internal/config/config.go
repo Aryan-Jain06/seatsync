@@ -28,10 +28,14 @@ const (
 
 // Config is the fully resolved configuration for the server.
 type Config struct {
-	Port               string
-	DatabaseURL        string
-	RedisAddr          string
-	RedisPassword      string
+	Port          string
+	DatabaseURL   string
+	RedisAddr     string
+	RedisPassword string
+	// RedisTLS dials Redis over TLS. Hosted providers such as Upstash and
+	// Redis Cloud accept TLS connections only; a local container does not
+	// offer it at all.
+	RedisTLS           bool
 	CORSAllowedOrigins []string
 	RunMigrations      bool
 
@@ -150,6 +154,7 @@ func Load() (*Config, error) {
 		DatabaseURL:         envString("DATABASE_URL", "postgres://seatsync:seatsync@localhost:5432/seatsync?sslmode=disable"),
 		RedisAddr:           envString("REDIS_ADDR", "localhost:6379"),
 		RedisPassword:       envString("REDIS_PASSWORD", ""),
+		RedisTLS:            envBool("REDIS_TLS", false),
 		CORSAllowedOrigins:  splitAndTrim(envString("CORS_ALLOWED_ORIGINS", "http://localhost:3000")),
 		RunMigrations:       envBool("RUN_MIGRATIONS", false),
 		JWTSecret:           []byte(envString("JWT_SECRET", insecureDefaultSecret)),

@@ -3,9 +3,11 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -72,7 +74,7 @@ func run() error {
 	defer pool.Close()
 	slog.Info("connected to postgres")
 
-	rdb := redis.NewClient(&redis.Options{
+	redisOptions := &redis.Options{
 		Addr:         cfg.RedisAddr,
 		Password:     cfg.RedisPassword,
 		DialTimeout:  5 * time.Second,
@@ -81,7 +83,23 @@ func run() error {
 		// Sized to match the database pool so a burst of concurrent holds is
 		// not throttled at the Redis client.
 		PoolSize: 30,
-	})
+	}
+
+	// Hosted Redis providers accept TLS connections only. The server name is
+	// taken from the address so the certificate is verified against the host
+	// actually being dialled rather than skipped.
+	if cfg.RedisTLS {
+		host, _, err := net.SplitHostPort(cfg.RedisAddr)
+		if err != nil {
+			return fmt.Errorf("parse REDIS_ADDR %q for TLS: %w", cfg.RedisAddr, err)
+		}
+		redisOptions.TLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			ServerName: host,
+		}
+	}
+
+	rdb := redis.NewClient(redisOptions)
 	defer func() {
 		if err := rdb.Close(); err != nil {
 			slog.Warn("closing redis client", "error", err)
