@@ -1,0 +1,212 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.24"
+  NODE_VERSION: "20"
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: seatsync
+          POSTGRES_PASSWORD: seatsync
+          POSTGRES_DB: seatsync
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U seatsync -d seatsync"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgres://seatsync:seatsync@localhost:5432/seatsync?sslmode=disable
+      REDIS_ADDR: localhost:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+
+      - name: Check formatting
+        working-directory: backend
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        working-directory: backend
+        run: go vet ./...
+
+      - name: Apply migrations
+        working-directory: backend
+        run: go run ./cmd/migrate up
+
+      # The race detector is the point of this step: the seat locking, hub and
+      # rate limiter tests all spawn many goroutines contending for one thing.
+      - name: Test with the race detector
+        working-directory: backend
+        run: go test ./... -race -count=1
+
+  concurrency-proof:
+    name: Concurrency proof (500 attempts, 50 seats)
+    runs-on: ubuntu-latest
+    needs: backend
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: seatsync
+          POSTGRES_PASSWORD: seatsync
+          POSTGRES_DB: seatsync
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U seatsync -d seatsync"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgres://seatsync:seatsync@localhost:5432/seatsync?sslmode=disable
+      REDIS_ADDR: localhost:6379
+      # Deterministic success, so a simulated decline can never be mistaken
+      # for a lost race. Latency is removed so the run is about contention.
+      PAYMENT_MODE: always_success
+      PAYMENT_MIN_LATENCY: 0s
+      PAYMENT_MAX_LATENCY: 0s
+      JWT_SECRET: ci-only-secret-not-used-anywhere-else
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring \
+            --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
+            --keyserver hkp://keyserver.ubuntu.com:80 \
+            --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" \
+            | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install -y k6
+          k6 version
+
+      - name: Install psql
+        run: sudo apt-get install -y postgresql-client
+
+      - name: Apply migrations
+        working-directory: backend
+        run: go run ./cmd/migrate up
+
+      - name: Start the API
+        working-directory: backend
+        run: |
+          go build -o /tmp/seatsync-server ./cmd/server
+          /tmp/seatsync-server > /tmp/server.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/health >/dev/null 2>&1; then
+              echo "API is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "API failed to start:"
+          cat /tmp/server.log
+          exit 1
+
+      # Rate limiting stays ENABLED here deliberately. Authenticated writes are
+      # metered per user, and the proof uses 500 distinct users, so throttling
+      # does not interfere. Running with protection off would prove less.
+      - name: Run the concurrency proof
+        run: ./loadtest/run.sh
+
+      - name: Server log on failure
+        if: failure()
+        run: cat /tmp/server.log
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loadtest-results
+          path: loadtest/results/
+          if-no-files-found: ignore
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Type check
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+          NEXT_PUBLIC_WS_BASE_URL: ws://localhost:8080
