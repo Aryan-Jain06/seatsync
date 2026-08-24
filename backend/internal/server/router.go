@@ -18,6 +18,7 @@ import (
 type Deps struct {
 	Config *config.Config
 	Auth   *handlers.AuthHandler
+	Events *handlers.EventHandler
 	Health *handlers.HealthHandler
 	Tokens middleware.Authenticator
 }
@@ -38,6 +39,7 @@ func NewRouter(deps Deps) http.Handler {
 	}))
 
 	requireAuth := middleware.RequireAuth(deps.Tokens)
+	optionalAuth := middleware.OptionalAuth(deps.Tokens)
 
 	r.Get("/health", deps.Health.Live)
 	r.Get("/health/ready", deps.Health.Ready)
@@ -49,6 +51,14 @@ func NewRouter(deps Deps) http.Handler {
 		r.Post("/logout", deps.Auth.Logout)
 
 		r.With(requireAuth).Get("/me", deps.Auth.Me)
+	})
+
+	// The catalogue is public. The seat map additionally reads the caller's
+	// identity when a token happens to be present, to mark their own holds.
+	r.Route("/events", func(r chi.Router) {
+		r.Get("/", deps.Events.List)
+		r.Get("/{id}", deps.Events.Get)
+		r.With(optionalAuth).Get("/{id}/seatmap", deps.Events.SeatMap)
 	})
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {

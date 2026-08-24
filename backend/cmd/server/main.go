@@ -96,12 +96,17 @@ func run() error {
 
 	userRepo := repos.NewUserRepo(pool)
 	refreshRepo := repos.NewRefreshTokenRepo(pool)
+	eventRepo := repos.NewEventRepo(pool)
 
 	authService := services.NewAuthService(userRepo, refreshRepo, tokenIssuer, 0)
+	// Holds are not backed by Redis yet, so every seat reads as available or
+	// confirmed. Phase 3 replaces the reader without touching the seat map.
+	catalogService := services.NewCatalogService(eventRepo, services.NoopHoldReader{})
 
 	router := server.NewRouter(server.Deps{
 		Config: cfg,
 		Auth:   handlers.NewAuthHandler(authService),
+		Events: handlers.NewEventHandler(catalogService),
 		Health: handlers.NewHealthHandler(pool, rdb),
 		Tokens: tokenIssuer,
 	})
