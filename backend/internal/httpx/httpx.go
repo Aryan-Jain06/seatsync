@@ -197,3 +197,7 @@ func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	}
 	return nil
 }
+
+// StatusPaymentRequired is used for a declined payment: the request was well
+// formed and the booking is valid, but the provider refused the charge.
+const StatusPaymentRequired = http.StatusPaymentRequired

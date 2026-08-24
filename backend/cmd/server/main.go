@@ -20,6 +20,7 @@ import (
 	"github.com/Aryan-Jain06/seatsync/backend/internal/db"
 	"github.com/Aryan-Jain06/seatsync/backend/internal/handlers"
 	"github.com/Aryan-Jain06/seatsync/backend/internal/locks"
+	"github.com/Aryan-Jain06/seatsync/backend/internal/payments"
 	"github.com/Aryan-Jain06/seatsync/backend/internal/repos"
 	"github.com/Aryan-Jain06/seatsync/backend/internal/server"
 	"github.com/Aryan-Jain06/seatsync/backend/internal/services"
@@ -100,6 +101,7 @@ func run() error {
 	refreshRepo := repos.NewRefreshTokenRepo(pool)
 	eventRepo := repos.NewEventRepo(pool)
 	bookingRepo := repos.NewBookingRepo(pool)
+	paymentRepo := repos.NewPaymentRepo(pool)
 
 	lockManager := locks.NewManager(rdb, cfg.HoldTTL)
 
@@ -109,12 +111,17 @@ func run() error {
 	authService := services.NewAuthService(userRepo, refreshRepo, tokenIssuer, 0)
 	catalogService := services.NewCatalogService(eventRepo, lockManager)
 	holdService := services.NewHoldService(eventRepo, bookingRepo, lockManager, broadcaster, cfg.MaxSeatsPerHold)
+	paymentService := services.NewPaymentService(
+		bookingRepo, paymentRepo, lockManager, lockManager,
+		payments.NewMockProvider(cfg), broadcaster,
+	)
 
 	router := server.NewRouter(server.Deps{
 		Config: cfg,
 		Auth:   handlers.NewAuthHandler(authService),
 		Events: handlers.NewEventHandler(catalogService),
 		Holds:  handlers.NewHoldHandler(holdService),
+		Pay:    handlers.NewPaymentHandler(paymentService),
 		Health: handlers.NewHealthHandler(pool, rdb),
 		Tokens: tokenIssuer,
 	})

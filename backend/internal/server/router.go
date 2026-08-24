@@ -20,6 +20,7 @@ type Deps struct {
 	Auth   *handlers.AuthHandler
 	Events *handlers.EventHandler
 	Holds  *handlers.HoldHandler
+	Pay    *handlers.PaymentHandler
 	Health *handlers.HealthHandler
 	Tokens middleware.Authenticator
 }
@@ -73,6 +74,7 @@ func NewRouter(deps Deps) http.Handler {
 	r.Route("/bookings", func(r chi.Router) {
 		r.Use(requireAuth)
 		r.Get("/{booking_id}", deps.Holds.Get)
+		r.Post("/{booking_id}/pay", deps.Pay.Pay)
 	})
 
 	r.Route("/me", func(r chi.Router) {

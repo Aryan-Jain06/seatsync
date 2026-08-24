@@ -73,7 +73,7 @@ build: ## Compile the backend binary to backend/bin/server
 	cd $(BACKEND) && go build -o bin/server ./cmd/server
 
 .PHONY: test
-test: ## Run backend unit tests
+test: ## Run backend tests (repos/locks tests need postgres + redis running)
 	cd $(BACKEND) && go test ./... -count=1
 
 .PHONY: test-race

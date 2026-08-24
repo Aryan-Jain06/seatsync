@@ -262,3 +262,29 @@ func parseSeatIDList(raw any) ([]uuid.UUID, error) {
 	}
 	return ids, nil
 }
+
+// paymentSlotKey names the mutex guarding one booking's payment attempts.
+func paymentSlotKey(bookingID uuid.UUID) string {
+	return "pay:" + bookingID.String()
+}
+
+// AcquirePaymentSlot takes the payment mutex for a booking.
+//
+// SET NX gives at-most-one semantics, and the TTL means a process that dies
+// mid-charge frees the slot instead of blocking the booking for ever. It
+// returns false when an attempt is already running.
+func (m *Manager) AcquirePaymentSlot(ctx context.Context, bookingID uuid.UUID, ttl time.Duration) (bool, error) {
+	acquired, err := m.rdb.SetNX(ctx, paymentSlotKey(bookingID), "1", ttl).Result()
+	if err != nil {
+		return false, fmt.Errorf("locks: acquire payment slot: %w", err)
+	}
+	return acquired, nil
+}
+
+// ReleasePaymentSlot frees the payment mutex.
+func (m *Manager) ReleasePaymentSlot(ctx context.Context, bookingID uuid.UUID) error {
+	if err := m.rdb.Del(ctx, paymentSlotKey(bookingID)).Err(); err != nil {
+		return fmt.Errorf("locks: release payment slot: %w", err)
+	}
+	return nil
+}
