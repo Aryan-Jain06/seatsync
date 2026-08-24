@@ -605,9 +605,10 @@ that against Postgres's limit. PgBouncer in transaction mode is the standard
 fix and would come before anything else.
 
 **The WebSocket hub is memory-bound**, roughly 10k connections per instance.
-It is already per-event, so sharding by event across instances is natural —
-but it broadcasts in-process, so multiple instances need Redis pub/sub to reach
-subscribers on other nodes. That is the first thing to change when scaling out.
+It is per-event and relays updates between instances over Redis pub/sub, so
+adding instances works — each one fans out to its own subscribers. The relay
+publishes one message per event rather than to a single firehose, so an
+instance is not woken by traffic for events nobody on it is watching.
 
 **Redis last.** Single-node Redis handles ~100k ops/sec; seat locking is a
 handful of ops per booking. It is nowhere near the bottleneck.
@@ -623,15 +624,15 @@ only by retry logic and the fact that the mock provider is not real. A genuine
 implementation needs authorise/capture plus reconciliation, and I would not
 ship this against real money without them.
 
-Second weakest: the WebSocket hub is in-process. Run two API instances and a
-user connected to instance A will not see a hold placed through instance B.
-Redis pub/sub between hubs is the fix, and it is the first thing I would build
-next.
-
-Third: `TRUST_PROXY_HEADERS` is a footgun by construction. Enabled without a
+Second weakest: `TRUST_PROXY_HEADERS` is a footgun by construction. Enabled without a
 proxy that overwrites `X-Forwarded-For`, any client can forge its address and
-rate limiting becomes decorative. It defaults to off and is commented, but it
-is a setting that can be got wrong.
+rate limiting becomes decorative. It defaults to off, the server warns at startup when it is
+enabled, and it is commented in `.env.example` — but it is still a setting
+that can be got wrong, and nothing about a misconfigured service looks wrong
+from the outside.
+
+Third: there is no refund or cancellation path. A confirmed booking is
+permanent, which is correct for the invariant and wrong for a real business.
 
 ---
 
@@ -639,17 +640,18 @@ is a setting that can be got wrong.
 
 In the order I would actually do them:
 
-1. **Redis pub/sub between WebSocket hubs**, so the system survives running
-   more than one API instance. This is the only thing currently blocking
-   horizontal scaling.
-2. **Authorise/capture payments**, closing the charge-then-crash window.
-3. **A reconciliation job** comparing provider records to local payments.
-4. **Structured metrics** — holds acquired, conflict rate, confirm latency,
+1. **Authorise/capture payments**, closing the charge-then-crash window.
+2. **A reconciliation job** comparing provider records to local payments.
+3. **Structured metrics** — holds acquired, conflict rate, confirm latency,
    expiry lag — because the interesting failures here are statistical.
-5. **Seat map caching**, currently a full read per request. An event with
+4. **Seat map caching**, currently a full read per request. An event with
    50,000 seats under refresh pressure will feel it.
-6. **Admin endpoints** for creating events and venues. The schema and the role
+5. **Admin endpoints** for creating events and venues. The schema and the role
    check exist; the handlers do not.
+6. **A refund path**, so a confirmed booking can be cancelled.
+
+Done since the first draft of this document: Redis pub/sub between the
+WebSocket hubs, which was the item blocking horizontal scaling.
 
 Deliberately not on the list: a message queue, microservices, or Kubernetes.
 None solves a problem this system currently has.

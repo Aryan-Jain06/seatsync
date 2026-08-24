@@ -147,10 +147,22 @@ func TestASlowClientIsDroppedAndTheRestKeepUp(t *testing.T) {
 	require.Eventually(t, func() bool { return hub.ClientCount(eventID) == 1 },
 		2*time.Second, 20*time.Millisecond)
 
-	// The slow client never reads again. Its OS socket buffer fills, then
-	// its writer blocks, then its send channel fills, and the hub evicts it.
-	for range 5000 {
-		hub.BroadcastSeatUpdates(eventID, []models.SeatUpdate{{SeatID: uuid.New(), Status: models.SeatHeld}})
+	// The slow client never reads again. Its OS socket buffer fills, then its
+	// writer blocks, then its send channel fills, and the hub evicts it.
+	//
+	// The messages are deliberately large. Loopback socket buffers autotune
+	// into the megabytes, so a stream of small updates can be absorbed
+	// entirely by the kernel and the writer never blocks at all: whether the
+	// client is evicted then depends on the broadcast loop outpacing the
+	// write pump, which is a race the test would sometimes lose. Sending
+	// batches that dwarf any plausible buffer removes the timing dependency.
+	fat := make([]models.SeatUpdate, 500)
+	for i := range fat {
+		fat[i] = models.SeatUpdate{SeatID: uuid.New(), Status: models.SeatHeld}
+	}
+
+	for range 2000 {
+		hub.BroadcastSeatUpdates(eventID, fat)
 		if hub.ClientCount(eventID) == 0 {
 			break
 		}

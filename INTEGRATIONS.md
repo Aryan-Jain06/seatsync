@@ -46,7 +46,7 @@ The interfaces that already exist:
 |---|---|---|---|
 | `payments.Provider` | `internal/payments/provider.go:32` | `MockProvider` | Razorpay, Stripe |
 | `services.SeatLocker` | `internal/services/holds.go:21` | `locks.Manager` (Redis) | Rarely changed |
-| `services.SeatBroadcaster` | `internal/services/holds.go:31` | `realtime.Hub` | A pub/sub hub |
+| `services.SeatBroadcaster` | `internal/services/holds.go:31` | `realtime.PubSub` | Rarely changed |
 | `services.PaymentMutex` | `internal/services/payments.go:31` | `locks.Manager` | Rarely changed |
 | `services.HoldReader` | `internal/services/catalog.go:22` | `locks.Manager` | Rarely changed |
 
@@ -399,46 +399,47 @@ each against a 20-connection limit fails immediately.
 
 ## 6. Running more than one instance
 
-This is the integration that unblocks scaling, and it is the first item on the
-roadmap in [EXPLANATION.md](EXPLANATION.md).
+This already works. It is documented here because it is the part people expect
+to be missing, and because the failure mode is worth understanding.
 
-**The problem.** `realtime.Hub` keeps subscribers in a map in memory. A user
-connected to instance A never hears about a hold placed through instance B.
-Seat maps are still correct on load and after any action — only live push
-breaks — but it looks broken.
+**The problem it solves.** `realtime.Hub` keeps its subscribers in a map in
+memory. On its own, a user connected to instance A would never learn about a
+hold placed through instance B — seat maps would still be correct on load and
+after any action, but live push would appear broken.
 
-**The fix.** Redis pub/sub between hubs. Redis is already a dependency, so
-this adds no new infrastructure.
+**How it works.** `realtime.PubSub` wraps the hub and relays every update
+through Redis. Redis was already a dependency, so this adds no infrastructure.
+It is wired in at `cmd/server/main.go`, and satisfies
+`services.SeatBroadcaster`, so it substitutes for a bare hub wherever one was
+used.
 
-The hub already satisfies `services.SeatBroadcaster`
-(`internal/services/holds.go:31`), so the change is contained:
+Two properties worth knowing:
 
-```go
-// BroadcastSeatUpdates publishes to Redis rather than only to local
-// subscribers, so every instance's hub delivers the update.
-func (h *PubSubHub) BroadcastSeatUpdates(eventID uuid.UUID, updates []models.SeatUpdate) {
-    payload, err := json.Marshal(updates)
-    if err != nil {
-        slog.Error("marshal seat updates", "error", err)
-        return
-    }
-    if err := h.rdb.Publish(ctx, "seatupdates:"+eventID.String(), payload).Err(); err != nil {
-        // Fall back to local delivery: subscribers on this instance still
-        // get the update, which is better than nobody getting it.
-        slog.Error("publish seat updates", "error", err)
-        h.local.BroadcastSeatUpdates(eventID, updates)
-    }
-}
-```
+**Local delivery never depends on Redis.** `BroadcastSeatUpdates` serves local
+subscribers first and unconditionally, then publishes for the other instances.
+If Redis is unreachable, each instance still serves its own subscribers — the
+deployment degrades to single-instance behaviour rather than going silent.
+There is a test for exactly this (`TestLocalDeliverySurvivesRedisBeingUnreachable`).
 
-Each instance subscribes to `seatupdates:*` and fans out to its own local
-subscribers. The existing `realtime.Hub` becomes the local delivery half and
-does not otherwise change — its slow-client eviction and shutdown draining
-stay exactly as they are.
+**A publisher does not deliver its own message twice.** Every published
+message carries an origin id identifying the process that produced it. When it
+arrives back over the instance's own pattern subscription, it is recognised and
+dropped, because the local delivery already happened
+(`TestPublisherDeliversLocallyExactlyOnce`).
 
-**Until this exists, keep `replicas: 1`.**
+Publishing is per event (`seatupdates:{eventID}`) rather than to a single
+firehose, so an instance is not woken by traffic for events nobody on it is
+watching.
 
----
+Verified with two real processes: a hold placed on `:8080` reaches a WebSocket
+subscriber attached to `:8081`.
+
+### What still limits scaling out
+
+Not the hub. The ceiling is Postgres connections — `internal/db/db.go` sets
+`MaxConns = 25` per instance, so three replicas want 75 connections against a
+managed tier that may allow 20. **PgBouncer** in transaction mode is the fix,
+and it is the thing to add before a third replica, not the relay.
 
 ## 7. Metrics
 
@@ -598,8 +599,8 @@ If you are going to do some of this and not all of it, this order:
 1. **Cloudflare.** Twenty minutes, free, immediate protection.
 2. **Error tracking.** One line in `httpx.Error` catches everything.
 3. **Email.** The product feels broken without a confirmation.
-4. **Redis pub/sub for the hub.** Unblocks running more than one instance.
-5. **Metrics.** When you need to know *why* something is slow.
+4. **Metrics.** When you need to know *why* something is slow.
+5. **PgBouncer**, before you run a third replica.
 6. **Payments.** Last, because it is the largest change and the only one where
    a mistake costs money. Do not start it until the rest is stable.
 

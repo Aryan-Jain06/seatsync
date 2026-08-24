@@ -100,6 +100,17 @@ func run() error {
 		slog.Warn("rate limiting is DISABLED; do not run this way in production")
 	}
 
+	// Trusting forwarding headers without a proxy that overwrites them lets
+	// any client forge its address, which turns rate limiting into
+	// decoration and reopens the login endpoint to password guessing. The
+	// combination is worth calling out loudly, because nothing about the
+	// running service looks wrong when it is misconfigured this way.
+	if cfg.TrustProxyHeaders && cfg.RateLimitEnabled {
+		slog.Warn("TRUST_PROXY_HEADERS is on: X-Forwarded-For is believed, " +
+			"so rate limits are only as trustworthy as the proxy in front. " +
+			"If this service is reachable directly, turn it off")
+	}
+
 	// --- wiring ---------------------------------------------------------
 	tokenIssuer := auth.NewTokenIssuer(cfg.JWTSecret, cfg.JWTAccessTTL, cfg.JWTRefreshTTL)
 
@@ -116,7 +127,13 @@ func run() error {
 	// off mid-message and no pump goroutine outlives the process.
 	defer hub.Close()
 
-	var broadcaster services.SeatBroadcaster = hub
+	// Relay updates through Redis so every instance's hub delivers them.
+	// Without this the hub is process-local: a user connected to one instance
+	// never learns about a hold placed through another.
+	relay := realtime.NewPubSub(hub, rdb)
+	defer relay.Close()
+
+	var broadcaster services.SeatBroadcaster = relay
 
 	authService := services.NewAuthService(userRepo, refreshRepo, tokenIssuer, 0)
 	catalogService := services.NewCatalogService(eventRepo, lockManager)
@@ -152,6 +169,14 @@ func run() error {
 		expiryWorker.Run(ctx)
 	}()
 
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		if err := relay.Run(ctx); err != nil {
+			slog.Error("seat update relay stopped", "error", err)
+		}
+	}()
+
 	// --- serve ----------------------------------------------------------
 	serveErr := make(chan error, 1)
 	go func() {
@@ -185,6 +210,7 @@ func run() error {
 
 	// Close subscribers only once the HTTP server has stopped accepting, so
 	// nobody is disconnected while a request could still be broadcasting.
+	relay.Close()
 	hub.Close()
 
 	// The workers watch ctx, which is already cancelled, so this waits only

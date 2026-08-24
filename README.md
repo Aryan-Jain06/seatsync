@@ -252,10 +252,10 @@ callers and none is left untouched by chance.
   Unexpected outcomes                                    0
   Outcomes accounted for                         500 / 500
 
-  Latency p95 (all requests)                      327.7 ms
-  Latency p99 (all requests)                      355.1 ms
-  Latency median                                  264.4 ms
-  Latency max                                     362.7 ms
+  Latency p95 (all requests)                      427.9 ms
+  Latency p99 (all requests)                      463.6 ms
+  Latency median                                  327.9 ms
+  Latency max                                     511.4 ms
 ─────────────────────────────────────────────────────────
   PASS  exactly 50 seats sold, 450 attempts rejected cleanly
 ─────────────────────────────────────────────────────────
@@ -276,6 +276,11 @@ Then, asked of the database directly rather than of the API:
   PASS  every invariant holds
 ──────────────────────────────────────────────────────────
 ```
+
+Latency is measured with the cross-instance relay in the path, which adds one
+Redis publish per broadcast on the hold and confirm paths: p95 was ~328 ms
+before it, ~428 ms after. That is the price of being able to run more than one
+instance, paid under 10:1 contention.
 
 The two checks are deliberately independent. k6 reports what the API told it;
 the SQL asks what is actually stored. A bug that made the API report success
@@ -411,7 +416,7 @@ make test-race    # with the race detector
 make cover        # HTML coverage report
 ```
 
-54 tests, all passing under `-race`. Every push runs them in CI, together with
+59 tests, all passing under `-race`. Every push runs them in CI, together with
 the 500-request concurrency proof — so the guarantee at the top of this file is
 re-verified on every commit, publicly, in the
 [Actions tab](https://github.com/Aryan-Jain06/seatsync/actions).
@@ -422,7 +427,7 @@ The ones worth knowing about:
 |---|---|
 | `internal/repos` | The confirm transaction. 20 transactions racing to confirm one seat yield exactly one sale, with nothing half-written. Idempotency claim and replay. |
 | `internal/locks` | 100 goroutines racing for one seat yield one winner. All-or-nothing acquisition. Release refuses to touch another caller's lock. |
-| `internal/realtime` | Slow clients are evicted, not waited on. 20 connect/disconnect cycles leak no goroutines. `Close` genuinely drains. |
+| `internal/realtime` | Slow clients are evicted, not waited on. 20 connect/disconnect cycles leak no goroutines. `Close` genuinely drains. Updates cross between instances over Redis, exactly once, and local delivery survives Redis being unreachable. |
 | `internal/ratelimit` | 100 concurrent callers get exactly the burst, never more. |
 | `internal/auth` | JWT `alg=none` downgrade and signature tampering are refused. |
 | `internal/services` | Seat map merge: confirmed always beats a stale hold. |

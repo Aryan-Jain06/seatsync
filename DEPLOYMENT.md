@@ -39,17 +39,17 @@ Four things must exist somewhere. Nothing else is required.
 | **Redis 7+** (or Valkey) | Seat locks, rate limits | One instance | Holds fail; **nothing is double-sold** |
 | **Next.js frontend** | The browser app | Static-ish, any CDN | No UI; the API still works |
 
-\* **One important exception.** The WebSocket hub is currently in-process. Run
-two API instances and a user connected to instance A will not see holds placed
-through instance B. Seat maps still refresh correctly on page load and after
-any action — only the *live* push is affected.
+\* Seat updates are relayed between instances over Redis pub/sub, so a user
+connected to one instance sees holds placed through any other. Verified with
+two processes: a hold on `:8080` reaches a subscriber on `:8081`.
 
-So: **one API instance is fully correct. More than one needs Redis pub/sub
-between the hubs first.** This is the single most important thing to know
-before scaling out, and it is the first item on the roadmap in EXPLANATION.md.
+Local delivery does not depend on Redis. If the relay cannot reach it, each
+instance still serves its own subscribers — a multi-instance deployment
+degrades to single-instance behaviour rather than going silent.
 
-For any realistic launch volume, one instance is fine. Do not add instances to
-feel scalable; add them when one is measurably saturated.
+That said, do not add instances to feel scalable; add them when one is
+measurably saturated. Note that connection count multiplies against your
+Postgres limit — see [Connection limits](#connection-limits).
 
 ### On Redis and licensing
 
@@ -375,8 +375,8 @@ Key points rather than a full listing:
   nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
   nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
   ```
-- **Set `replicas: 1` on the backend** until Redis pub/sub is added to the
-  WebSocket hub. See section 1.
+- **`replicas` may exceed 1.** Seat updates relay between instances over
+  Redis. Watch the Postgres connection ceiling rather than the hub.
 - **`TRUST_PROXY_HEADERS=true`** is correct here, because ingress-nginx sets
   `X-Forwarded-For`.
 
@@ -573,7 +573,7 @@ Before anyone else uses it:
 - [ ] `CORS_ALLOWED_ORIGINS` lists your domain, not `*`
 - [ ] HTTPS everywhere; WebSocket URL is `wss://`
 - [ ] Database backups enabled **and a restore tested**
-- [ ] `backend` is at `replicas: 1`, or Redis pub/sub has been added to the hub
+- [ ] Postgres connection ceiling accounts for every replica (PgBouncer if needed)
 - [ ] Payments still mocked → the UI says so plainly
 - [ ] The duplicate-pairs query is scheduled and alerting
 - [ ] Secrets are not in Git
