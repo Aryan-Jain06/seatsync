@@ -1,0 +1,40 @@
+# Binaries
+/backend/bin/
+/backend/server
+*.exe
+*.test
+*.out
+
+# Go workspace
+go.work
+go.work.sum
+
+# Env
+.env
+.env.local
+*.env.local
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+build/
+.pnpm-store/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Test + coverage artifacts
+coverage.out
+coverage.html
+/loadtest/results/
+
+# Local data volumes
+/.data/

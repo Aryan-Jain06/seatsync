@@ -1,0 +1,88 @@
+name: seatsync
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: seatsync-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-seatsync}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-seatsync}
+      POSTGRES_DB: ${POSTGRES_DB:-seatsync}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-seatsync} -d ${POSTGRES_DB:-seatsync}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: seatsync-redis
+    command: ["redis-server", "--appendonly", "yes", "--save", ""]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: seatsync-backend
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-seatsync}:${POSTGRES_PASSWORD:-seatsync}@postgres:5432/${POSTGRES_DB:-seatsync}?sslmode=disable
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      PORT: 8080
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-insecure-secret-change-me}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-720h}
+      HOLD_TTL: ${HOLD_TTL:-5m}
+      MAX_SEATS_PER_HOLD: ${MAX_SEATS_PER_HOLD:-6}
+      EXPIRY_SWEEP_INTERVAL: ${EXPIRY_SWEEP_INTERVAL:-2s}
+      PAYMENT_MODE: ${PAYMENT_MODE:-random}
+      PAYMENT_SUCCESS_RATE: ${PAYMENT_SUCCESS_RATE:-0.9}
+      PAYMENT_MIN_LATENCY: ${PAYMENT_MIN_LATENCY:-1s}
+      PAYMENT_MAX_LATENCY: ${PAYMENT_MAX_LATENCY:-2s}
+      # Run migrations on boot so `docker compose up` is the only step needed.
+      RUN_MIGRATIONS: "true"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8080}
+        NEXT_PUBLIC_WS_BASE_URL: ${NEXT_PUBLIC_WS_BASE_URL:-ws://localhost:8080}
+    container_name: seatsync-frontend
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8080}
+      NEXT_PUBLIC_WS_BASE_URL: ${NEXT_PUBLIC_WS_BASE_URL:-ws://localhost:8080}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
