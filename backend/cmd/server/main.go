@@ -21,6 +21,7 @@ import (
 	"github.com/Aryan-Jain06/seatsync/backend/internal/handlers"
 	"github.com/Aryan-Jain06/seatsync/backend/internal/locks"
 	"github.com/Aryan-Jain06/seatsync/backend/internal/payments"
+	"github.com/Aryan-Jain06/seatsync/backend/internal/realtime"
 	"github.com/Aryan-Jain06/seatsync/backend/internal/repos"
 	"github.com/Aryan-Jain06/seatsync/backend/internal/server"
 	"github.com/Aryan-Jain06/seatsync/backend/internal/services"
@@ -105,8 +106,12 @@ func run() error {
 
 	lockManager := locks.NewManager(rdb, cfg.HoldTTL)
 
-	// Replaced by the WebSocket hub in Phase 5.
-	var broadcaster services.SeatBroadcaster = services.NoopBroadcaster{}
+	hub := realtime.NewHub()
+	// Drained after the HTTP server stops accepting, so no subscriber is cut
+	// off mid-message and no pump goroutine outlives the process.
+	defer hub.Close()
+
+	var broadcaster services.SeatBroadcaster = hub
 
 	authService := services.NewAuthService(userRepo, refreshRepo, tokenIssuer, 0)
 	catalogService := services.NewCatalogService(eventRepo, lockManager)
@@ -122,6 +127,7 @@ func run() error {
 		Events: handlers.NewEventHandler(catalogService),
 		Holds:  handlers.NewHoldHandler(holdService),
 		Pay:    handlers.NewPaymentHandler(paymentService),
+		WS:     handlers.NewWSHandler(hub, cfg.CORSAllowedOrigins),
 		Health: handlers.NewHealthHandler(pool, rdb),
 		Tokens: tokenIssuer,
 	})
@@ -170,6 +176,10 @@ func run() error {
 		}
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}
+
+	// Close subscribers only once the HTTP server has stopped accepting, so
+	// nobody is disconnected while a request could still be broadcasting.
+	hub.Close()
 
 	// The workers watch ctx, which is already cancelled, so this waits only
 	// for their current iteration to finish.

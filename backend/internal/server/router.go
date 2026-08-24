@@ -21,6 +21,7 @@ type Deps struct {
 	Events *handlers.EventHandler
 	Holds  *handlers.HoldHandler
 	Pay    *handlers.PaymentHandler
+	WS     *handlers.WSHandler
 	Health *handlers.HealthHandler
 	Tokens middleware.Authenticator
 }
@@ -81,6 +82,10 @@ func NewRouter(deps Deps) http.Handler {
 		r.Use(requireAuth)
 		r.Get("/bookings", deps.Holds.List)
 	})
+
+	// Public: seat state is not user specific, so a subscriber needs no
+	// credentials to watch an event.
+	r.Get("/ws/events/{id}", deps.WS.Subscribe)
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, r, httpx.NotFound("No route matches that path."))

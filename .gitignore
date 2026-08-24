@@ -43,3 +43,6 @@ coverage.html
 .proxy-ca.crt
 Dockerfile.sandbox
 Dockerfile.sandbox.dockerignore
+
+# Local development aids, not part of the service.
+backend/.devtools/
