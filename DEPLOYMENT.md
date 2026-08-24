@@ -123,7 +123,11 @@ far easier to debug.
 
 ## Path A — Managed platforms (easiest)
 
-Four free services. Roughly 30 minutes.
+Four free services.
+
+> **For a step-by-step version of this path** — every field, every value, with
+> verification after each step and a troubleshooting table — see
+> **[GOLIVE.md](GOLIVE.md)**. What follows is the summary.
 
 ```
 Vercel ─────────► frontend (Next.js)
@@ -157,9 +161,10 @@ this system uses several Redis commands per booking plus one rate-limit check
 per request. A demo will not come close; a real launch might. If you exceed it,
 run Valkey on a small VM instead — it is one container.
 
-Set `REDIS_ADDR` to `host:port` and `REDIS_PASSWORD` to the password. Upstash
-requires TLS, so if the client fails to connect, that is why — see the note in
-the production configuration section below.
+Set `REDIS_ADDR` to `host:port`, `REDIS_PASSWORD` to the password, and
+**`REDIS_TLS=true`** — Upstash accepts TLS connections only. Omit it and the
+backend fails to start with `connect to redis: context deadline exceeded`,
+which reads like a firewall problem and is neither.
 
 ### Step 3 — The API on Koyeb
 
@@ -179,6 +184,7 @@ Environment variables:
 DATABASE_URL=<from Neon>
 REDIS_ADDR=<from Upstash>
 REDIS_PASSWORD=<from Upstash>
+REDIS_TLS=true
 JWT_SECRET=<generate: openssl rand -base64 48>
 RUN_MIGRATIONS=true
 CORS_ALLOWED_ORIGINS=https://your-app.vercel.app
@@ -197,8 +203,16 @@ terminates TLS and sets `X-Forwarded-For` itself — see the warning in section 
 > Postgres expires after 90 days. Koyeb's free tier does not sleep, which
 > matters for a demo link you send to people.
 
-Seeding: run `/seed` once from the platform's shell, or temporarily set the
-start command to `/seed && /server`.
+Seeding needs care: the image is built `FROM scratch`, so it has no shell and
+there is no terminal to open on the running service. Seed from your own machine
+against the hosted database instead, which works because the database is
+reachable from anywhere:
+
+```bash
+DATABASE_URL="<from Neon>" go run ./cmd/seed      # from backend/
+```
+
+[GOLIVE.md](GOLIVE.md) gives a Docker form of the same command.
 
 ### Step 4 — The frontend on Vercel
 
