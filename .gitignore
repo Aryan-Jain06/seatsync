@@ -38,3 +38,8 @@ coverage.html
 
 # Local data volumes
 /.data/
+
+# Sandbox-only Docker overlay used to build behind a TLS-intercepting proxy.
+.proxy-ca.crt
+Dockerfile.sandbox
+Dockerfile.sandbox.dockerignore
