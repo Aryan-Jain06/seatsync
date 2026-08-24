@@ -21,6 +21,7 @@ import (
 	"github.com/Aryan-Jain06/seatsync/backend/internal/handlers"
 	"github.com/Aryan-Jain06/seatsync/backend/internal/locks"
 	"github.com/Aryan-Jain06/seatsync/backend/internal/payments"
+	"github.com/Aryan-Jain06/seatsync/backend/internal/ratelimit"
 	"github.com/Aryan-Jain06/seatsync/backend/internal/realtime"
 	"github.com/Aryan-Jain06/seatsync/backend/internal/repos"
 	"github.com/Aryan-Jain06/seatsync/backend/internal/server"
@@ -95,6 +96,10 @@ func run() error {
 	}
 	slog.Info("connected to redis")
 
+	if !cfg.RateLimitEnabled {
+		slog.Warn("rate limiting is DISABLED; do not run this way in production")
+	}
+
 	// --- wiring ---------------------------------------------------------
 	tokenIssuer := auth.NewTokenIssuer(cfg.JWTSecret, cfg.JWTAccessTTL, cfg.JWTRefreshTTL)
 
@@ -122,14 +127,15 @@ func run() error {
 	)
 
 	router := server.NewRouter(server.Deps{
-		Config: cfg,
-		Auth:   handlers.NewAuthHandler(authService),
-		Events: handlers.NewEventHandler(catalogService),
-		Holds:  handlers.NewHoldHandler(holdService),
-		Pay:    handlers.NewPaymentHandler(paymentService),
-		WS:     handlers.NewWSHandler(hub, cfg.CORSAllowedOrigins),
-		Health: handlers.NewHealthHandler(pool, rdb),
-		Tokens: tokenIssuer,
+		Config:  cfg,
+		Limiter: ratelimit.NewLimiter(rdb),
+		Auth:    handlers.NewAuthHandler(authService),
+		Events:  handlers.NewEventHandler(catalogService),
+		Holds:   handlers.NewHoldHandler(holdService),
+		Pay:     handlers.NewPaymentHandler(paymentService),
+		WS:      handlers.NewWSHandler(hub, cfg.CORSAllowedOrigins),
+		Health:  handlers.NewHealthHandler(pool, rdb),
+		Tokens:  tokenIssuer,
 	})
 
 	httpServer := server.New(":"+cfg.Port, router)

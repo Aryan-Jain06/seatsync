@@ -47,6 +47,35 @@ type Config struct {
 	PaymentSuccessRate float64
 	PaymentMinLatency  time.Duration
 	PaymentMaxLatency  time.Duration
+
+	// --- protection -------------------------------------------------------
+
+	// RateLimitEnabled turns request throttling on. Disable it only for
+	// load testing against a machine you control.
+	RateLimitEnabled bool
+	// RateLimitAuth guards sign-in and registration against credential
+	// guessing. Keyed by client address, since there is no user yet.
+	RateLimitAuthBurst     int
+	RateLimitAuthPerMinute float64
+	// RateLimitRead guards the public catalogue and seat map.
+	RateLimitReadBurst     int
+	RateLimitReadPerMinute float64
+	// RateLimitWrite guards holds and payments, keyed by user.
+	RateLimitWriteBurst     int
+	RateLimitWritePerMinute float64
+
+	// TrustProxyHeaders makes the server believe X-Forwarded-For. Enable it
+	// only when something trustworthy sets that header, because a client can
+	// otherwise forge its own address and evade rate limiting.
+	TrustProxyHeaders bool
+
+	// RequireAuthForBrowsing closes the catalogue and seat map to anonymous
+	// callers. Off by default, since a ticketing site's listings are normally
+	// public, but available when the API should not be readable by strangers.
+	RequireAuthForBrowsing bool
+
+	// EnableHSTS sends Strict-Transport-Security on TLS requests.
+	EnableHSTS bool
 }
 
 // insecureDefaultSecret matches .env.example. It is fine for local work and
@@ -91,6 +120,31 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	authBurst, err := envInt("RATE_LIMIT_AUTH_BURST", 10)
+	if err != nil {
+		return nil, err
+	}
+	authRate, err := envFloat("RATE_LIMIT_AUTH_PER_MINUTE", 10)
+	if err != nil {
+		return nil, err
+	}
+	readBurst, err := envInt("RATE_LIMIT_READ_BURST", 120)
+	if err != nil {
+		return nil, err
+	}
+	readRate, err := envFloat("RATE_LIMIT_READ_PER_MINUTE", 240)
+	if err != nil {
+		return nil, err
+	}
+	writeBurst, err := envInt("RATE_LIMIT_WRITE_BURST", 30)
+	if err != nil {
+		return nil, err
+	}
+	writeRate, err := envFloat("RATE_LIMIT_WRITE_PER_MINUTE", 60)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
 		Port:                envString("PORT", "8080"),
 		DatabaseURL:         envString("DATABASE_URL", "postgres://seatsync:seatsync@localhost:5432/seatsync?sslmode=disable"),
@@ -108,6 +162,18 @@ func Load() (*Config, error) {
 		PaymentSuccessRate:  successRate,
 		PaymentMinLatency:   minLatency,
 		PaymentMaxLatency:   maxLatency,
+
+		RateLimitEnabled:        envBool("RATE_LIMIT_ENABLED", true),
+		RateLimitAuthBurst:      authBurst,
+		RateLimitAuthPerMinute:  authRate,
+		RateLimitReadBurst:      readBurst,
+		RateLimitReadPerMinute:  readRate,
+		RateLimitWriteBurst:     writeBurst,
+		RateLimitWritePerMinute: writeRate,
+
+		TrustProxyHeaders:      envBool("TRUST_PROXY_HEADERS", false),
+		RequireAuthForBrowsing: envBool("REQUIRE_AUTH_FOR_BROWSING", false),
+		EnableHSTS:             envBool("ENABLE_HSTS", false),
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -147,6 +213,17 @@ func (c *Config) validate() error {
 	}
 	if c.PaymentMinLatency < 0 || c.PaymentMaxLatency < 0 {
 		return fmt.Errorf("config: payment latencies must not be negative")
+	}
+	if c.RateLimitEnabled {
+		for name, pair := range map[string][2]float64{
+			"RATE_LIMIT_AUTH":  {float64(c.RateLimitAuthBurst), c.RateLimitAuthPerMinute},
+			"RATE_LIMIT_READ":  {float64(c.RateLimitReadBurst), c.RateLimitReadPerMinute},
+			"RATE_LIMIT_WRITE": {float64(c.RateLimitWriteBurst), c.RateLimitWritePerMinute},
+		} {
+			if pair[0] < 1 || pair[1] <= 0 {
+				return fmt.Errorf("config: %s burst and rate must both be positive when rate limiting is enabled", name)
+			}
+		}
 	}
 	if c.PaymentMaxLatency < c.PaymentMinLatency {
 		return fmt.Errorf("config: PAYMENT_MAX_LATENCY (%s) must not be below PAYMENT_MIN_LATENCY (%s)",

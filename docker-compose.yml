@@ -55,6 +55,10 @@ services:
       PAYMENT_SUCCESS_RATE: ${PAYMENT_SUCCESS_RATE:-0.9}
       PAYMENT_MIN_LATENCY: ${PAYMENT_MIN_LATENCY:-1s}
       PAYMENT_MAX_LATENCY: ${PAYMENT_MAX_LATENCY:-2s}
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
+      REQUIRE_AUTH_FOR_BROWSING: ${REQUIRE_AUTH_FOR_BROWSING:-false}
+      ENABLE_HSTS: ${ENABLE_HSTS:-false}
       # Run migrations on boot so `docker compose up` is the only step needed.
       RUN_MIGRATIONS: "true"
     ports:
