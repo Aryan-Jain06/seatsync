@@ -344,16 +344,12 @@ redis:
 
 ### If you use Upstash, read this
 
-Upstash requires TLS, and `REDIS_ADDR` alone will not connect. You need to set
-`TLSConfig` on the client in `cmd/server/main.go:75`:
+Upstash accepts **TLS connections only**. Set `REDIS_TLS=true` alongside
+`REDIS_ADDR` and `REDIS_PASSWORD`; the server then dials over TLS and verifies
+the certificate against the host in the address.
 
-```go
-rdb := redis.NewClient(&redis.Options{
-    Addr:      cfg.RedisAddr,
-    Password:  cfg.RedisPassword,
-    TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12},  // required by Upstash
-})
-```
+Without it the backend fails to start with `connect to redis: context deadline
+exceeded`, which reads like a network or firewall problem and is neither.
 
 Also count your commands. Per booking this system issues roughly: one `EVAL`
 to acquire, one `ZADD`, one `EVAL` to verify, one `EVAL` to release, one
@@ -440,6 +436,8 @@ Not the hub. The ceiling is Postgres connections — `internal/db/db.go` sets
 `MaxConns = 25` per instance, so three replicas want 75 connections against a
 managed tier that may allow 20. **PgBouncer** in transaction mode is the fix,
 and it is the thing to add before a third replica, not the relay.
+
+---
 
 ## 7. Metrics
 
