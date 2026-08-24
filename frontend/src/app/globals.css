@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body {
+    @apply bg-ink-950 text-ink-200 antialiased;
+  }
+
+  /* Keyboard focus stays visible; the seat map is navigable without a mouse. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent ring-offset-2 ring-offset-ink-950;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-lg border border-ink-800 bg-ink-900;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium
+           transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply btn bg-accent text-ink-950 hover:bg-accent-hover;
+  }
+
+  .btn-secondary {
+    @apply btn border border-ink-700 bg-ink-850 text-ink-200 hover:border-ink-600 hover:bg-ink-800;
+  }
+
+  .btn-ghost {
+    @apply btn text-ink-300 hover:bg-ink-850 hover:text-ink-200;
+  }
+
+  .input {
+    @apply w-full rounded-md border border-ink-700 bg-ink-850 px-3 py-2 text-sm text-ink-200
+           placeholder:text-ink-500 focus:border-accent focus:outline-none;
+  }
+
+  .label {
+    @apply mb-1.5 block text-xs font-medium uppercase tracking-wide text-ink-400;
+  }
+}
