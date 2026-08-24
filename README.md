@@ -478,3 +478,7 @@ component, every design decision and the alternatives that were rejected, plus
 answers to the hardest questions this project invites.
 
 **[DEPLOYMENT.md](DEPLOYMENT.md)** — what to add to run this for real, and how.
+
+**[INTEGRATIONS.md](INTEGRATIONS.md)** — connecting real services: payment
+gateways, email, sign-in with Google, monitoring, and the rest. Includes the
+seam map showing where each one plugs into the code.

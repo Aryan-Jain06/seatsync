@@ -86,6 +86,10 @@ Until all four exist, keep `PAYMENT_MODE` as a mock and label the deployment a
 demo. This is the weakest part of the system and pretending otherwise is how
 people lose money.
 
+**[INTEGRATIONS.md](INTEGRATIONS.md) covers the actual implementation** —
+which interface to change, what authorise/capture looks like in this codebase,
+and the webhook rules.
+
 ### Email does not exist
 
 No booking confirmations, no password reset. Free options: Resend (3,000/month),
