@@ -19,6 +19,7 @@ type Deps struct {
 	Config *config.Config
 	Auth   *handlers.AuthHandler
 	Events *handlers.EventHandler
+	Holds  *handlers.HoldHandler
 	Health *handlers.HealthHandler
 	Tokens middleware.Authenticator
 }
@@ -59,6 +60,24 @@ func NewRouter(deps Deps) http.Handler {
 		r.Get("/", deps.Events.List)
 		r.Get("/{id}", deps.Events.Get)
 		r.With(optionalAuth).Get("/{id}/seatmap", deps.Events.SeatMap)
+
+		// Holding seats commits inventory, so it always requires a caller.
+		r.With(requireAuth).Post("/{id}/holds", deps.Holds.Create)
+	})
+
+	r.Route("/holds", func(r chi.Router) {
+		r.Use(requireAuth)
+		r.Delete("/{booking_id}", deps.Holds.Release)
+	})
+
+	r.Route("/bookings", func(r chi.Router) {
+		r.Use(requireAuth)
+		r.Get("/{booking_id}", deps.Holds.Get)
+	})
+
+	r.Route("/me", func(r chi.Router) {
+		r.Use(requireAuth)
+		r.Get("/bookings", deps.Holds.List)
 	})
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {

@@ -176,6 +176,14 @@ type Payment struct {
 	CreatedAt   time.Time     `json:"created_at"`
 }
 
+// SeatHold is a live claim over a seat, as recorded by the lock store.
+type SeatHold struct {
+	// UserID is who holds the seat.
+	UserID uuid.UUID `json:"user_id"`
+	// ExpiresAt is when the hold lapses and the seat frees itself.
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
 // SeatUpdate is broadcast over WebSocket whenever a seat changes state.
 type SeatUpdate struct {
 	SeatID uuid.UUID  `json:"seat_id"`

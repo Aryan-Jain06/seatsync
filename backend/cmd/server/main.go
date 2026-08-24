@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/Aryan-Jain06/seatsync/backend/internal/config"
 	"github.com/Aryan-Jain06/seatsync/backend/internal/db"
 	"github.com/Aryan-Jain06/seatsync/backend/internal/handlers"
+	"github.com/Aryan-Jain06/seatsync/backend/internal/locks"
 	"github.com/Aryan-Jain06/seatsync/backend/internal/repos"
 	"github.com/Aryan-Jain06/seatsync/backend/internal/server"
 	"github.com/Aryan-Jain06/seatsync/backend/internal/services"
@@ -97,21 +99,39 @@ func run() error {
 	userRepo := repos.NewUserRepo(pool)
 	refreshRepo := repos.NewRefreshTokenRepo(pool)
 	eventRepo := repos.NewEventRepo(pool)
+	bookingRepo := repos.NewBookingRepo(pool)
+
+	lockManager := locks.NewManager(rdb, cfg.HoldTTL)
+
+	// Replaced by the WebSocket hub in Phase 5.
+	var broadcaster services.SeatBroadcaster = services.NoopBroadcaster{}
 
 	authService := services.NewAuthService(userRepo, refreshRepo, tokenIssuer, 0)
-	// Holds are not backed by Redis yet, so every seat reads as available or
-	// confirmed. Phase 3 replaces the reader without touching the seat map.
-	catalogService := services.NewCatalogService(eventRepo, services.NoopHoldReader{})
+	catalogService := services.NewCatalogService(eventRepo, lockManager)
+	holdService := services.NewHoldService(eventRepo, bookingRepo, lockManager, broadcaster, cfg.MaxSeatsPerHold)
 
 	router := server.NewRouter(server.Deps{
 		Config: cfg,
 		Auth:   handlers.NewAuthHandler(authService),
 		Events: handlers.NewEventHandler(catalogService),
+		Holds:  handlers.NewHoldHandler(holdService),
 		Health: handlers.NewHealthHandler(pool, rdb),
 		Tokens: tokenIssuer,
 	})
 
 	httpServer := server.New(":"+cfg.Port, router)
+
+	// --- background workers ---------------------------------------------
+	// workersDone closes once every background goroutine has returned, so
+	// shutdown can wait for them rather than exiting mid-sweep.
+	var workers sync.WaitGroup
+	expiryWorker := services.NewExpiryWorker(bookingRepo, broadcaster, cfg.ExpirySweepInterval)
+
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		expiryWorker.Run(ctx)
+	}()
 
 	// --- serve ----------------------------------------------------------
 	serveErr := make(chan error, 1)
@@ -143,6 +163,11 @@ func run() error {
 		}
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}
+
+	// The workers watch ctx, which is already cancelled, so this waits only
+	// for their current iteration to finish.
+	workers.Wait()
+
 	return <-serveErr
 }
 

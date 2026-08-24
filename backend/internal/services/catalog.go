@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -13,14 +12,6 @@ import (
 	"github.com/Aryan-Jain06/seatsync/backend/internal/models"
 	"github.com/Aryan-Jain06/seatsync/backend/internal/repos"
 )
-
-// Hold describes a live claim over a seat, as reported by the lock store.
-type Hold struct {
-	// UserID is who holds the seat.
-	UserID uuid.UUID
-	// ExpiresAt is when the hold lapses.
-	ExpiresAt time.Time
-}
 
 // HoldReader exposes the live holds for an event.
 //
@@ -31,7 +22,7 @@ type Hold struct {
 type HoldReader interface {
 	// HeldSeats returns the seats currently held for an event, keyed by seat
 	// ID. Expired entries must not be included.
-	HeldSeats(ctx context.Context, eventID uuid.UUID) (map[uuid.UUID]Hold, error)
+	HeldSeats(ctx context.Context, eventID uuid.UUID) (map[uuid.UUID]models.SeatHold, error)
 }
 
 // NoopHoldReader reports that nothing is held. It keeps the seat map working
@@ -39,8 +30,8 @@ type HoldReader interface {
 type NoopHoldReader struct{}
 
 // HeldSeats always returns an empty map.
-func (NoopHoldReader) HeldSeats(context.Context, uuid.UUID) (map[uuid.UUID]Hold, error) {
-	return map[uuid.UUID]Hold{}, nil
+func (NoopHoldReader) HeldSeats(context.Context, uuid.UUID) (map[uuid.UUID]models.SeatHold, error) {
+	return map[uuid.UUID]models.SeatHold{}, nil
 }
 
 // CatalogService serves the read path: events and seat maps.
@@ -107,7 +98,7 @@ func (s *CatalogService) SeatMap(ctx context.Context, eventID, viewer uuid.UUID)
 		// and make the degradation visible in the logs.
 		slog.ErrorContext(ctx, "could not read seat holds; serving seat map without them",
 			"error", err, "event_id", eventID)
-		held = map[uuid.UUID]Hold{}
+		held = map[uuid.UUID]models.SeatHold{}
 	}
 
 	return buildSeatMap(eventID, event.BasePrice, seatRows, held, viewer), nil
@@ -121,7 +112,7 @@ func buildSeatMap(
 	eventID uuid.UUID,
 	basePrice int64,
 	seatRows []repos.SeatRow,
-	held map[uuid.UUID]Hold,
+	held map[uuid.UUID]models.SeatHold,
 	viewer uuid.UUID,
 ) *models.SeatMap {
 	seatMap := &models.SeatMap{

@@ -34,8 +34,8 @@ func TestSeatMapMarksAvailableHeldAndConfirmed(t *testing.T) {
 		seatRow(heldByOther, false),
 		seatRow(confirmed, true),
 	}
-	held := map[uuid.UUID]Hold{
-		heldByOther: {UserID: otherUser, ExpiresAt: time.Now().Add(time.Minute)},
+	held := map[uuid.UUID]models.SeatHold{
+		heldByOther: models.SeatHold{UserID: otherUser, ExpiresAt: time.Now().Add(time.Minute)},
 	}
 
 	got := buildSeatMap(uuid.New(), 1000, rows, held, uuid.Nil)
@@ -61,8 +61,8 @@ func TestConfirmedBeatsAStaleHold(t *testing.T) {
 	holder := uuid.New()
 
 	rows := []repos.SeatRow{seatRow(seatID, true)}
-	held := map[uuid.UUID]Hold{
-		seatID: {UserID: holder, ExpiresAt: time.Now().Add(time.Minute)},
+	held := map[uuid.UUID]models.SeatHold{
+		seatID: models.SeatHold{UserID: holder, ExpiresAt: time.Now().Add(time.Minute)},
 	}
 
 	got := buildSeatMap(uuid.New(), 1000, rows, held, holder)
@@ -78,9 +78,9 @@ func TestHeldByMeOnlyForTheHolder(t *testing.T) {
 	me, them := uuid.New(), uuid.New()
 
 	rows := []repos.SeatRow{seatRow(mine, false), seatRow(theirs, false)}
-	held := map[uuid.UUID]Hold{
-		mine:   {UserID: me, ExpiresAt: time.Now().Add(time.Minute)},
-		theirs: {UserID: them, ExpiresAt: time.Now().Add(time.Minute)},
+	held := map[uuid.UUID]models.SeatHold{
+		mine:   models.SeatHold{UserID: me, ExpiresAt: time.Now().Add(time.Minute)},
+		theirs: models.SeatHold{UserID: them, ExpiresAt: time.Now().Add(time.Minute)},
 	}
 
 	got := buildSeatMap(uuid.New(), 1000, rows, held, me)
@@ -100,8 +100,8 @@ func TestAnonymousViewerOwnsNothing(t *testing.T) {
 	seatID := uuid.New()
 
 	rows := []repos.SeatRow{seatRow(seatID, false)}
-	held := map[uuid.UUID]Hold{
-		seatID: {UserID: uuid.Nil, ExpiresAt: time.Now().Add(time.Minute)},
+	held := map[uuid.UUID]models.SeatHold{
+		seatID: models.SeatHold{UserID: uuid.Nil, ExpiresAt: time.Now().Add(time.Minute)},
 	}
 
 	got := buildSeatMap(uuid.New(), 1000, rows, held, uuid.Nil)
