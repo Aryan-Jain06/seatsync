@@ -1,0 +1,96 @@
+# Keeps the deployed API awake, and the managed database with it.
+#
+# Two separate problems this addresses:
+#
+#   Render's free web services spin down after 15 minutes with no inbound
+#   HTTP traffic, and take ~30 seconds to wake. Any request resets that
+#   timer, so a ping every 10 minutes keeps one warm. (Koyeb's free tier does
+#   not sleep, so this is only needed on Render.)
+#
+#   Neon suspends the database after roughly 5 minutes idle. /health/ready
+#   checks Postgres and Redis, so pinging it exercises the database rather
+#   than only the web process.
+#
+# IMPORTANT LIMITATION. GitHub's scheduled runners are best-effort: a cron
+# here is frequently delayed by several minutes and is sometimes skipped
+# entirely under load. That is fine against Render's 15 minute window, but it
+# is NOT reliable enough for Neon's ~5 minute one. If a consistently warm
+# database matters, drive the same URL from cron-job.org or UptimeRobot at a
+# 1-5 minute interval instead; both are free and purpose-built.
+#
+# GitHub also disables scheduled workflows automatically after 60 days
+# without repository activity, so this stops silently on a dormant repo.
+#
+# SETUP. This does nothing until you tell it where to ping:
+#   Settings -> Secrets and variables -> Actions -> Variables -> New variable
+#   Name:  API_BASE_URL
+#   Value: https://your-api.koyeb.app     (no trailing slash)
+
+name: Keep warm
+
+on:
+  schedule:
+    # Every 10 minutes. Comfortably inside Render's 15 minute window even
+    # when GitHub runs it late.
+    - cron: "*/10 * * * *"
+  # So you can trigger it by hand to confirm the setup works.
+  workflow_dispatch:
+
+# Never let two pings overlap, and never queue a backlog of them.
+concurrency:
+  group: keep-warm
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    name: Ping /health/ready
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Ping the readiness endpoint
+        env:
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+        run: |
+          set -uo pipefail
+
+          if [ -z "${API_BASE_URL}" ]; then
+            echo "::notice::API_BASE_URL is not set, so there is nothing to ping."
+            echo "Set it under Settings > Secrets and variables > Actions > Variables."
+            exit 0
+          fi
+
+          url="${API_BASE_URL%/}/health/ready"
+          echo "Pinging ${url}"
+
+          # A sleeping service can take ~30s to wake, so the timeout is
+          # generous and a first failure is retried rather than reported.
+          # Only a run where every attempt fails is treated as downtime, so
+          # the resulting email means something.
+          for attempt in 1 2 3; do
+            # Start each attempt from an empty body, so a failed request
+            # cannot report the previous attempt's response as its own.
+            : > /tmp/body.txt
+
+            # curl already prints 000 when it cannot connect, so the exit
+            # status only needs swallowing, not substituting.
+            status=$(curl -sS -o /tmp/body.txt -w '%{http_code}' \
+                       --max-time 60 "${url}") || true
+            status="${status:-000}"
+
+            if [ "${status}" = "200" ]; then
+              echo "attempt ${attempt}: ${status} — awake"
+              cat /tmp/body.txt
+              exit 0
+            fi
+
+            echo "attempt ${attempt}: ${status}"
+            [ -s /tmp/body.txt ] && cat /tmp/body.txt
+
+            if [ "${attempt}" -lt 3 ]; then
+              sleep 20
+            fi
+          done
+
+          echo "::error::${url} did not return 200 after three attempts."
+          exit 1
